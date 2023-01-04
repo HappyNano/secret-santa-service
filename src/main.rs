@@ -3,12 +3,11 @@ use std::{
     fs::File,
     sync::{Arc, Mutex},
 };
-use tide::{Request, new};
+use tide::{Request};
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 enum Access {
-    Guest,
     User,
     Admin,
 }
@@ -72,7 +71,7 @@ async fn main() -> tide::Result<()> {
 
     app.with(tide::sessions::SessionMiddleware::new(
         tide::sessions::MemoryStore::new(),
-        "we recommend you use std::env::var(\"TIDE_SECRET\").unwrap().as_bytes() instead of a fixed value".as_bytes()
+        "12345678910111213141516171819202122223242526".as_bytes()
         ));
 
     app.with(tide::utils::Before(
@@ -87,11 +86,6 @@ async fn main() -> tide::Result<()> {
             request
         },
     ));
-
-    // app.at("/").get(|req: tide::Request<Arc<Mutex<DataBase>>>| async move {
-    //     let visits: usize = req.session().get("visits").unwrap();
-    //     Ok(format!("you have visited this website {} times", visits))
-    // });
 
     app.at("/reset").get(quit);
     app.at("/login").post(login);
@@ -112,6 +106,15 @@ async fn main() -> tide::Result<()> {
 }
 
 async fn login(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
+    {
+        let session = req.session();
+        let user_id: i8 = session.get("user_id").unwrap();
+        if user_id != -1
+        {
+            return Ok("You are already logged in!".into());
+        }
+    }
+    
     #[derive(serde::Serialize, serde::Deserialize)]
     struct TmpPerson {name: String}
     let tmp_person: TmpPerson = req.body_json().await?;
