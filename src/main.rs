@@ -3,7 +3,7 @@ use std::{
     fs::File,
     sync::{Arc, Mutex},
 };
-use tide::{Request};
+use tide::Request;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -16,18 +16,18 @@ enum Access {
 struct Person {
     name: String,
     santa_to: String,
-    in_group: i8,
     access: Access,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Group {
+    name: String,
     people: Vec<Person>,
+    closed: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct DataBase {
-    users: HashMap<i8, Person>,
     groups: HashMap<i8, Group>,
 }
 
@@ -48,7 +48,6 @@ async fn main() -> tide::Result<()> {
                 std::io::Error::new(err.kind(), format!("Failed to create database file. {err}"))
             })?;
             let database = DataBase {
-                users: HashMap::new(),
                 groups: HashMap::new(),
             };
             serde_json::to_writer(file, &database).map_err(|err| {
@@ -65,112 +64,106 @@ async fn main() -> tide::Result<()> {
             panic!("Failed to open database file. {err}");
         }
     };
-    
+
     let state = Arc::new(Mutex::new(database));
     let mut app = tide::with_state(state);
 
-    app.with(tide::sessions::SessionMiddleware::new(
-        tide::sessions::MemoryStore::new(),
-        "12345678910111213141516171819202122223242526".as_bytes()
-        ));
+    app.at("/").post(index);
+    app.at("/groups").get(get_groups);
+    app.at("/create_group").post(create_group);
+    app.at("/terminate")
+        .get(|request: tide::Request<Arc<Mutex<DataBase>>>| async move {
+            let state = request.state();
+            std::fs::write(
+                "data.base",
+                serde_json::to_string(state).unwrap().as_bytes(),
+            )?;
+            std::process::exit(0);
+            #[allow(unreachable_code)]
+            Ok("done")
+        });
+    app.listen("192.168.0.103:8080").await?;
 
-    app.with(tide::utils::Before(
-        |mut request: tide::Request<Arc<Mutex<DataBase>>>| async move {
-            let session = request.session_mut();
-            let visits: usize = session.get("visits").unwrap_or_default();
-            let user_id: i8 = session.get("user_id").unwrap_or(-1);
-            if user_id == -1 {
-                session.insert("user_id", -1).unwrap();
-            }
-            session.insert("visits", visits + 1).unwrap();
-            request
-        },
-    ));
-
-    app.at("/reset").get(quit);
-    app.at("/login").post(login);
-
-    app.at("/").get(index);
-    app.at("/terminate").get(|request: tide::Request<Arc<Mutex<DataBase>>>| async move {
-        let state = request.state();
-        std::fs::write("data.base", serde_json::to_string(state).unwrap().as_bytes())?;
-        std::process::exit(0);
-        #[allow(unreachable_code)]
-        Ok("done")
-    });
-    app.listen("192.168.0.103:8080").await?; 
-
-    
     println!("Done");
     Ok(())
 }
 
-async fn login(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
-    {
-        let session = req.session();
-        let user_id: i8 = session.get("user_id").unwrap();
-        if user_id != -1
-        {
-            return Ok("You are already logged in!".into());
+async fn create_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Data {
+        name: String,
+        group_name: String,
+    }
+    let data: Data = req.body_json().await.unwrap_or(Data {
+        name: String::new(),
+        group_name: String::new(),
+    });
+
+    if data.name == "" || data.group_name == "" {
+        return Ok("Bad data".into());
+    }
+
+    let state = req.state();
+    let mut guard = state.lock().unwrap();
+    let mut groups = guard.groups.iter();
+
+    match groups.find(|i| i.1.name == data.group_name) {
+        None => {
+            let new_group_id: i8 = guard.groups.len() as i8;
+            let new_admin = Person {
+                name: data.name,
+                santa_to: String::new(),
+                access: Access::Admin,
+            };
+            let new_group = Group {
+                name: data.group_name,
+                people: vec![new_admin],
+                closed: false,
+            };
+            guard.groups.insert(new_group_id, new_group);
+        }
+        Some(_) => {
+            return Ok("Group with this name is exist".into());
         }
     }
-    
-    #[derive(serde::Serialize, serde::Deserialize)]
-    struct TmpPerson {name: String}
-    let tmp_person: TmpPerson = req.body_json().await?;
 
-    if tmp_person.name == "" {
-        return Ok(tide::Redirect::new("/").into());
-    }
-
-    let user_id: i8;
-    
-    {
-        let state = req.state();
-        let mut guard = state.lock().unwrap();
-        match guard.users.iter().find(
-            |p| p.1.name == tmp_person.name
-        ) {
-            None => {
-                let person = Person {
-                    name: tmp_person.name,
-                    santa_to: String::new(),
-                    in_group: -1,
-                    access: Access::User
-                }; 
-                let new_id: i8 = guard.users.len() as i8; 
-                guard.users.insert(new_id, person);
-                user_id = new_id;
-            }
-            Some(p) => {
-                user_id = p.0.clone();
-            },
-        };
-    }
-    
-    let session = req.session_mut();
-    session.insert("user_id", user_id)?;
-    
-    Ok(tide::Redirect::new("/").into())
+    Ok("Group is created".into())
 }
 
-async fn index(req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
-    let user_id: i8 = req.session().get("user_id").unwrap();
-    if user_id == -1
-    {
-        return Ok("You have to log in using POST request on /login with your name".into());
-    }
+async fn get_groups(req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
     let state = req.state();
     let guard = state.lock().unwrap();
-    let user = guard.users.iter().find(
-        |p| {
-            p.0 == &user_id
-        });
-    let user_name = &user.unwrap().1.name;
-    Ok(format!("Hello {user_name}!").into())
+    let groups = guard.groups.iter();
+    let mut out_message: String = String::new();
+
+    if guard.groups.len() == 0 {
+        out_message += "There is no group";
+    } else {
+        out_message += "Groups: \n";
+        for (id, group) in groups {
+            out_message += format!(
+                "Id: {}. Group name: \"{}\". Persons: {}. Is closed: {}\n",
+                id, group.name, guard.groups.len(), group.closed
+            )
+            .as_str();
+        }
+    }
+
+    Ok(out_message.into())
 }
 
-async fn quit(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
-    req.session_mut().destroy();
-    Ok(tide::Redirect::new("/").into())
+async fn index(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct User {
+        name: String,
+    }
+    let user: User = req.body_json().await.unwrap_or(User {
+        name: String::new(),
+    });
+
+    if user.name == "" {
+        return Ok(format!("Who are you?").into());
+    }
+
+    Ok(format!("Hello {}!", user.name).into())
 }
