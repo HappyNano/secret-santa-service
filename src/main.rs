@@ -207,7 +207,7 @@ async fn get_groups(req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
                 "Id: {}. Group name: \"{}\". Persons: {}. Is closed: {}\n",
                 id,
                 group.name,
-                guard.groups.len(),
+                group.people.len(),
                 group.closed
             )
             .as_str();
