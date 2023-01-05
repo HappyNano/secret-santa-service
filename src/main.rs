@@ -15,6 +15,7 @@ enum Access {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Person {
     name: String,
+    in_group: i8,
     santa_to: String,
     access: Access,
 }
@@ -71,6 +72,7 @@ async fn main() -> tide::Result<()> {
     app.at("/").post(index);
     app.at("/groups").get(get_groups);
     app.at("/create_group").post(create_group);
+    app.at("/join_group").post(join_group);
     app.at("/terminate")
         .get(|request: tide::Request<Arc<Mutex<DataBase>>>| async move {
             let state = request.state();
@@ -86,6 +88,61 @@ async fn main() -> tide::Result<()> {
 
     println!("Done");
     Ok(())
+}
+
+// fn is_group_exist(groups: &HashMap<i8, Group>, group_name: &String) -> bool {
+//     groups.iter().any(|i| i.1.name.eq(group_name))
+// }
+
+fn is_person_exist(groups: &HashMap<i8, Group>, name: &String) -> bool {
+    groups
+        .iter()
+        .any(|i| i.1.people.iter().any(|j| j.name.eq(name)))
+}
+
+async fn join_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Data {
+        name: String,
+        group_name: String,
+    }
+    let data: Data = req.body_json().await.unwrap_or(Data {
+        name: String::new(),
+        group_name: String::new(),
+    });
+
+    if data.name == "" || data.group_name == "" {
+        return Ok("Bad data".into());
+    }
+
+    let state = req.state();
+    let mut guard = state.lock().unwrap();
+
+    if is_person_exist(&guard.groups, &data.name) {
+        return Ok("You have to leave from group to join other".into());
+    }
+
+    let mut groups = guard.groups.iter_mut();
+
+    match groups.find(|i| i.1.name == data.group_name) {
+        None => {
+            return Ok("Group with that name does not exist".into());
+        }
+        Some(i) => {
+            if i.1.closed {
+                return Ok("This group is closed!".into());
+            }
+            let new_person = Person {
+                name: data.name,
+                in_group: i.0.clone(),
+                santa_to: String::new(),
+                access: Access::User,
+            };
+            i.1.people.push(new_person);
+        }
+    }
+
+    Ok(format!("You are in group \"{}\" now", data.group_name).into())
 }
 
 async fn create_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
@@ -107,11 +164,16 @@ async fn create_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
     let mut guard = state.lock().unwrap();
     let mut groups = guard.groups.iter();
 
+    if is_person_exist(&guard.groups, &data.name) {
+        return Ok("You have to leave from group to create other".into());
+    }
+
     match groups.find(|i| i.1.name == data.group_name) {
         None => {
             let new_group_id: i8 = guard.groups.len() as i8;
             let new_admin = Person {
                 name: data.name,
+                in_group: new_group_id,
                 santa_to: String::new(),
                 access: Access::Admin,
             };
@@ -143,7 +205,10 @@ async fn get_groups(req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
         for (id, group) in groups {
             out_message += format!(
                 "Id: {}. Group name: \"{}\". Persons: {}. Is closed: {}\n",
-                id, group.name, guard.groups.len(), group.closed
+                id,
+                group.name,
+                guard.groups.len(),
+                group.closed
             )
             .as_str();
         }
