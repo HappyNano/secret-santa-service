@@ -15,7 +15,6 @@ enum Access {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Person {
     name: String,
-    in_group: i8,
     santa_to: String,
     access: Access,
 }
@@ -73,6 +72,7 @@ async fn main() -> tide::Result<()> {
     app.at("/groups/list").get(get_groups);
     app.at("/groups/create").post(create_group);
     app.at("/groups/join").post(join_group);
+    app.at("/groups/members").post(get_members);
     app.at("/terminate")
         .get(|request: tide::Request<Arc<Mutex<DataBase>>>| async move {
             let state = request.state();
@@ -134,7 +134,6 @@ async fn join_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
             }
             let new_person = Person {
                 name: data.name,
-                in_group: i.0.clone(),
                 santa_to: String::new(),
                 access: Access::User,
             };
@@ -173,7 +172,6 @@ async fn create_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
             let new_group_id: i8 = guard.groups.len() as i8;
             let new_admin = Person {
                 name: data.name,
-                in_group: new_group_id,
                 santa_to: String::new(),
                 access: Access::Admin,
             };
@@ -190,6 +188,48 @@ async fn create_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
     }
 
     Ok("Group is created".into())
+}
+
+async fn get_members(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Data {
+        name: String,
+        group_name: String,
+    }
+    let data: Data = req.body_json().await.unwrap_or(Data {
+        name: String::new(),
+        group_name: String::new(),
+    });
+
+    if data.name == "" || data.group_name == "" {
+        return Ok("Bad data".into());
+    }
+
+    let state = req.state();
+    let guard = state.lock().unwrap();
+    let mut groups = guard.groups.iter();
+    let mut out_message: String = String::new();
+
+    match groups.find(|i| i.1.name == data.group_name) {
+        Some(g) => {
+            let mut id: i8 = 0;
+            for person in &g.1.people {
+                out_message += format!(
+                    "{}. Name: {}. Access: {:?}\n",
+                    id,
+                    person.name.as_str(),
+                    person.access
+                )
+                .as_str();
+                id += 1;
+            }
+        }
+        None => {
+            out_message += "There is not group with that name";
+        }
+    }
+
+    Ok(out_message.into())
 }
 
 async fn get_groups(req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
