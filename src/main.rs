@@ -70,9 +70,9 @@ async fn main() -> tide::Result<()> {
     let mut app = tide::with_state(state);
 
     app.at("/").post(index);
-    app.at("/groups").get(get_groups);
-    app.at("/create_group").post(create_group);
-    app.at("/join_group").post(join_group);
+    app.at("/groups/list").get(get_groups);
+    app.at("/groups/create").post(create_group);
+    app.at("/groups/join").post(join_group);
     app.at("/terminate")
         .get(|request: tide::Request<Arc<Mutex<DataBase>>>| async move {
             let state = request.state();
