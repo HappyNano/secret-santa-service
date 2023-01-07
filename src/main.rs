@@ -75,10 +75,13 @@ async fn main() -> tide::Result<()> {
     let mut app = tide::with_state(state);
 
     app.at("/").post(index);
+    app.at("/").get(index);
     app.at("/groups/list").get(get_groups);
     app.at("/groups/create").post(create_group);
     app.at("/groups/join").post(join_group);
     app.at("/groups/members").post(get_members);
+    app.at("/groups/new_admin").post(set_new_admin);//me
+    app.at("/groups/quit_admin").post(quit_admin);//me
     app.at("/terminate")
         .get(|request: tide::Request<Arc<Mutex<DataBase>>>| async move {
             let state = request.state();
@@ -90,7 +93,7 @@ async fn main() -> tide::Result<()> {
             #[allow(unreachable_code)]
             Ok("done")
         });
-    app.listen("192.168.0.103:8080").await?;
+    app.listen("192.168.0.102:8080").await?;
 
     println!("Done");
     Ok(())
@@ -269,7 +272,7 @@ async fn get_members(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
             }
         }
         None => {
-            return returnable_value("There is not group with that name", json, 400);
+            return returnable_value("There is no group with that name", json, 400);
         }
     }
 
@@ -306,6 +309,51 @@ async fn get_groups(req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
     }
 
     Ok(out_message.into())
+}
+
+async fn set_new_admin(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {//Моё 1 функция
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Data {
+        name: String,
+        group_name: String,
+        name_new_admin: String,
+    }
+    let data: Data = req.body_json().await.unwrap_or(Data {
+        name: String::new(),
+        group_name: String::new(),
+        name_new_admin: String::new(),
+    });
+
+    let QueryData { json } = req.query().unwrap_or(QueryData { json: false });
+
+    if data.name == "" || data.group_name == "" || data.name_new_admin =="" {
+        return returnable_value("Bad data", json, 400);
+    }
+
+    let state = req.state();
+    let mut guard = state.lock().unwrap();
+    
+    if !is_person_exist(&guard.groups, &data.name) || !is_person_exist(&guard.groups, &data.name_new_admin) {
+        return returnable_value("There is no such person", json, 405);
+    }
+
+    let mut groups = guard.groups.iter_mut();
+
+    match groups.find(|i| (i.1.name == data.name)) {
+        None => {
+            return returnable_value("There is no group with that name", json, 400);
+        }
+        Some(g) => {
+            match g.1.people.iter().find(|i| (i.name == data.name)).unwrap().access {
+                Access::User => {return returnable_value("No rights", json, 400);},
+                Access::Admin => {
+                    g.1.people.iter_mut().find(|i| (i.name == data.name_new_admin)).unwrap().access = Access::Admin;
+                },
+            }
+        }
+    }
+
+    returnable_value("Admin installed", json, 200)
 }
 
 async fn index(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
