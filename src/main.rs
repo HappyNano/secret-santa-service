@@ -3,7 +3,13 @@ use std::{
     fs::File,
     sync::{Arc, Mutex},
 };
+use tide::prelude::*;
 use tide::Request;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct QueryData {
+    json: bool,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -94,6 +100,23 @@ async fn main() -> tide::Result<()> {
 //     groups.iter().any(|i| i.1.name.eq(group_name))
 // }
 
+/*
+200 - Ok
+400 - Bad Request
+403 - Forbidden
+405 - Method Not Allowed
+*/
+fn returnable_value(text: &str, is_json: bool, code: usize) -> tide::Result {
+    if is_json {
+        return Ok(json!({
+            "code": code,
+            "message": text
+        })
+        .into());
+    }
+    Ok(text.into())
+}
+
 fn is_person_exist(groups: &HashMap<i8, Group>, name: &String) -> bool {
     groups
         .iter()
@@ -111,26 +134,28 @@ async fn join_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
         group_name: String::new(),
     });
 
+    let QueryData { json } = req.query().unwrap_or(QueryData { json: false });
+
     if data.name == "" || data.group_name == "" {
-        return Ok("Bad data".into());
+        return returnable_value("Bad data", json, 400);
     }
 
     let state = req.state();
     let mut guard = state.lock().unwrap();
 
     if is_person_exist(&guard.groups, &data.name) {
-        return Ok("You have to leave from group to join other".into());
+        return returnable_value("You have to leave from group to join other", json, 405);
     }
 
     let mut groups = guard.groups.iter_mut();
 
     match groups.find(|i| i.1.name == data.group_name) {
         None => {
-            return Ok("Group with that name does not exist".into());
+            return returnable_value("Group with that name does not exist", json, 400);
         }
         Some(i) => {
             if i.1.closed {
-                return Ok("This group is closed!".into());
+                return returnable_value("This group is closed!", json, 403);
             }
             let new_person = Person {
                 name: data.name,
@@ -141,7 +166,11 @@ async fn join_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
         }
     }
 
-    Ok(format!("You are in group \"{}\" now", data.group_name).into())
+    returnable_value(
+        format!("Done! You are in group \"{}\" now", data.group_name).as_str(),
+        json,
+        200,
+    )
 }
 
 async fn create_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
@@ -155,8 +184,10 @@ async fn create_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
         group_name: String::new(),
     });
 
+    let QueryData { json } = req.query().unwrap_or(QueryData { json: false });
+
     if data.name == "" || data.group_name == "" {
-        return Ok("Bad data".into());
+        return returnable_value("Bad data", json, 400);
     }
 
     let state = req.state();
@@ -164,7 +195,7 @@ async fn create_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
     let mut groups = guard.groups.iter();
 
     if is_person_exist(&guard.groups, &data.name) {
-        return Ok("You have to leave from group to create other".into());
+        return returnable_value("You have to leave from group to create other", json, 405);
     }
 
     match groups.find(|i| i.1.name == data.group_name) {
@@ -183,11 +214,11 @@ async fn create_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
             guard.groups.insert(new_group_id, new_group);
         }
         Some(_) => {
-            return Ok("Group with this name is exist".into());
+            return returnable_value("Group with this name is exist", json, 400);
         }
     }
 
-    Ok("Group is created".into())
+    returnable_value("Group is created", json, 200)
 }
 
 async fn get_members(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
@@ -201,8 +232,10 @@ async fn get_members(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
         group_name: String::new(),
     });
 
+    let QueryData { json } = req.query().unwrap_or(QueryData { json: false });
+
     if data.name == "" || data.group_name == "" {
-        return Ok("Bad data".into());
+        return returnable_value("Bad data", json, 400);
     }
 
     let state = req.state();
@@ -212,20 +245,31 @@ async fn get_members(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
 
     match groups.find(|i| i.1.name == data.group_name) {
         Some(g) => {
-            let mut id: i8 = 0;
-            for person in &g.1.people {
-                out_message += format!(
-                    "{}. Name: {}. Access: {:?}\n",
-                    id,
-                    person.name.as_str(),
-                    person.access
-                )
-                .as_str();
-                id += 1;
+            if json {
+                return Ok(json!({
+                    "code": 200,
+                    "message": {
+                        "group_name": data.group_name,
+                        "people": g.1.people
+                    }
+                })
+                .into());
+            } else {
+                let mut id: i8 = 0;
+                for person in &g.1.people {
+                    out_message += format!(
+                        "{}. Name: {}. Access: {:?}\n",
+                        id,
+                        person.name.as_str(),
+                        person.access
+                    )
+                    .as_str();
+                    id += 1;
+                }
             }
         }
         None => {
-            out_message += "There is not group with that name";
+            return returnable_value("There is not group with that name", json, 400);
         }
     }
 
@@ -234,23 +278,30 @@ async fn get_members(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
 
 async fn get_groups(req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
     let state = req.state();
+
+    let QueryData { json } = req.query().unwrap_or(QueryData { json: false });
+
     let guard = state.lock().unwrap();
     let groups = guard.groups.iter();
     let mut out_message: String = String::new();
 
     if guard.groups.len() == 0 {
-        out_message += "There is no group";
+        return returnable_value("There is no any group", json, 200);
     } else {
-        out_message += "Groups: \n";
-        for (id, group) in groups {
-            out_message += format!(
-                "Id: {}. Group name: \"{}\". Persons: {}. Is closed: {}\n",
-                id,
-                group.name,
-                group.people.len(),
-                group.closed
-            )
-            .as_str();
+        if json {
+            out_message = serde_json::to_string(state).unwrap();
+        } else {
+            out_message += "Groups: \n";
+            for (id, group) in groups {
+                out_message += format!(
+                    "Id: {}. Group name: \"{}\". Persons: {}. Is closed: {}\n",
+                    id,
+                    group.name,
+                    group.people.len(),
+                    group.closed
+                )
+                .as_str();
+            }
         }
     }
 
@@ -266,9 +317,11 @@ async fn index(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
         name: String::new(),
     });
 
+    let QueryData { json } = req.query().unwrap_or(QueryData { json: false });
+
     if user.name == "" {
-        return Ok(format!("Who are you?").into());
+        return returnable_value("Who are you?", json, 200);
     }
 
-    Ok(format!("Hello {}!", user.name).into())
+    returnable_value(format!("Hello {}!", user.name).as_str(), json, 200)
 }
