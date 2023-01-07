@@ -81,8 +81,8 @@ async fn main() -> tide::Result<()> {
     app.at("/groups/create").post(create_group);
     app.at("/groups/join").post(join_group);
     app.at("/groups/members").post(get_members);
-    app.at("/groups/new_admin").post(set_new_admin); //me
-    app.at("/groups/quit_admin").post(quit_admin); //me
+    app.at("/groups/new_admin").post(set_new_admin);
+    app.at("/groups/quit_admin").post(quit_admin);
     app.at("/groups/quit").post(quit_group);
     app.at("/groups/delete").post(delete_group);
     app.at("/groups/set_santas").post(set_santas);
@@ -284,10 +284,6 @@ async fn delete_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
 
     returnable_value("You delete this group", json, 200)
 }
-
-// fn is_group_exist(groups: &HashMap<i8, Group>, group_name: &String) -> bool {
-//     groups.iter().any(|i| i.1.name.eq(group_name))
-// }
 
 /*
 200 - Ok
@@ -498,7 +494,6 @@ async fn get_groups(req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
 }
 
 async fn set_new_admin(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
-    //Моё 1 функция
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Data {
         name: String,
