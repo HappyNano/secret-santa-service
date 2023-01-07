@@ -81,8 +81,8 @@ async fn main() -> tide::Result<()> {
     app.at("/groups/create").post(create_group);
     app.at("/groups/join").post(join_group);
     app.at("/groups/members").post(get_members);
-    app.at("/groups/new_admin").post(set_new_admin);//me
-    app.at("/groups/quit_admin").post(quit_admin);//me
+    app.at("/groups/new_admin").post(set_new_admin); //me
+    app.at("/groups/quit_admin").post(quit_admin); //me
     app.at("/groups/quit").post(quit_group);
     app.at("/groups/delete").post(delete_group);
     app.at("/groups/set_santas").post(set_santas);
@@ -143,15 +143,19 @@ async fn set_santas(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
                 .access
             {
                 Access::User => {
-                    return returnable_value("Only the administrator can assign a secret Santa", json, 403);
+                    return returnable_value(
+                        "Only the administrator can assign a secret Santa",
+                        json,
+                        403,
+                    );
                 }
                 Access::Admin => {
                     if i.1.people.len() < 2 {
                         return returnable_value("Not enough group members", json, 405);
                     }
-                    let last_index = i.1.people.len()-1;
+                    let last_index = i.1.people.len() - 1;
                     for j in 0..last_index {
-                        i.1.people[j].santa_to = i.1.people[j+1].name.clone();
+                        i.1.people[j].santa_to = i.1.people[j + 1].name.clone();
                     }
                     i.1.people[last_index].santa_to = i.1.people[0].name.clone();
                 }
@@ -493,7 +497,8 @@ async fn get_groups(req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
     Ok(out_message.into())
 }
 
-async fn set_new_admin(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {//Моё 1 функция
+async fn set_new_admin(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
+    //Моё 1 функция
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Data {
         name: String,
@@ -508,14 +513,16 @@ async fn set_new_admin(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
 
     let QueryData { json } = req.query().unwrap_or(QueryData { json: false });
 
-    if data.name == "" || data.group_name == "" || data.name_new_admin =="" {
+    if data.name == "" || data.group_name == "" || data.name_new_admin == "" {
         return returnable_value("Bad data", json, 400);
     }
 
     let state = req.state();
     let mut guard = state.lock().unwrap();
-    
-    if !is_person_exist(&guard.groups, &data.name) || !is_person_exist(&guard.groups, &data.name_new_admin) {
+
+    if !is_person_exist(&guard.groups, &data.name)
+        || !is_person_exist(&guard.groups, &data.name_new_admin)
+    {
         return returnable_value("There is no such person", json, 405);
     }
 
@@ -526,16 +533,101 @@ async fn set_new_admin(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
             return returnable_value("There is no group with that name", json, 400);
         }
         Some(g) => {
-            match g.1.people.iter().find(|i| (i.name == data.name)).unwrap().access {
-                Access::User => {return returnable_value("No rights", json, 400);},
+            match g
+                .1
+                .people
+                .iter()
+                .find(|i| (i.name == data.name))
+                .unwrap()
+                .access
+            {
+                Access::User => {
+                    return returnable_value("No rights", json, 400);
+                }
                 Access::Admin => {
-                    g.1.people.iter_mut().find(|i| (i.name == data.name_new_admin)).unwrap().access = Access::Admin;
-                },
+                    g.1.people
+                        .iter_mut()
+                        .find(|i| (i.name == data.name_new_admin))
+                        .unwrap()
+                        .access = Access::Admin;
+                }
             }
         }
     }
 
     returnable_value("Admin installed", json, 200)
+}
+
+async fn quit_admin(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Data {
+        name: String,
+        group_name: String,
+    }
+    let data: Data = req.body_json().await.unwrap_or(Data {
+        name: String::new(),
+        group_name: String::new(),
+    });
+
+    let QueryData { json } = req.query().unwrap_or(QueryData { json: false });
+
+    if data.name == "" || data.group_name == "" {
+        return returnable_value("Bad data", json, 400);
+    }
+
+    let state = req.state();
+    let mut guard = state.lock().unwrap();
+
+    if !is_person_exist(&guard.groups, &data.name) {
+        return returnable_value("Person does not exist", json, 405);
+    }
+
+    let mut groups = guard.groups.iter_mut();
+
+    match groups.find(|i| i.1.name == data.group_name) {
+        None => {
+            return returnable_value("Group with that name does not exist", json, 400);
+        }
+        Some(i) => {
+            match i
+                .1
+                .people
+                .iter()
+                .find(|j| j.name == data.name)
+                .unwrap()
+                .access
+            {
+                Access::User => {
+                    return returnable_value("You are not an admin!", json, 403);
+                }
+                Access::Admin => {
+                    let count =
+                        i.1.people
+                            .iter()
+                            .filter(|p| match p.access {
+                                Access::Admin => true,
+                                _ => false,
+                            })
+                            .count();
+                    if count == 1 {
+                        return returnable_value(
+                            "You cannot remove your administrator rights!",
+                            json,
+                            403,
+                        );
+                    } else {
+                        i.1.people
+                            .iter_mut()
+                            .find(|j| j.name == data.name)
+                            .unwrap()
+                            .access = Access::User;
+                    }
+                }
+            };
+        }
+    }
+
+    returnable_value("You have removed your administrator rights!", json, 200)
 }
 
 async fn index(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
