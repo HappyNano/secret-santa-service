@@ -76,7 +76,6 @@ async fn main() -> tide::Result<()> {
 
     app.at("/").get(index);
     app.at("/").post(index);
-    app.at("/").get(index);
     app.at("/groups/list").get(get_groups);
     app.at("/groups/create").post(create_group);
     app.at("/groups/join").post(join_group);
@@ -97,7 +96,7 @@ async fn main() -> tide::Result<()> {
             #[allow(unreachable_code)]
             Ok("done")
         });
-    app.listen("192.168.0.102:8080").await?;
+    app.listen("192.168.0.102:8080").await?; // Your ip address
 
     println!("Done");
     Ok(())
