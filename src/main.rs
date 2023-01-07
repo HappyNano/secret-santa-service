@@ -80,6 +80,8 @@ async fn main() -> tide::Result<()> {
     app.at("/groups/create").post(create_group);
     app.at("/groups/join").post(join_group);
     app.at("/groups/members").post(get_members);
+    app.at("/groups/quit").post(quit_group);
+    // app.at("/groups/delete").post(...);
     app.at("/terminate")
         .get(|request: tide::Request<Arc<Mutex<DataBase>>>| async move {
             let state = request.state();
@@ -95,6 +97,70 @@ async fn main() -> tide::Result<()> {
 
     println!("Done");
     Ok(())
+}
+
+async fn quit_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Data {
+        name: String,
+        group_name: String,
+    }
+    let data: Data = req.body_json().await.unwrap_or(Data {
+        name: String::new(),
+        group_name: String::new(),
+    });
+
+    let QueryData { json } = req.query().unwrap_or(QueryData { json: false });
+
+    if data.name == "" || data.group_name == "" {
+        return returnable_value("Bad data", json, 400);
+    }
+
+    let state = req.state();
+    let mut guard = state.lock().unwrap();
+
+    if !is_person_exist(&guard.groups, &data.name) {
+        return returnable_value("Person does not exist", json, 405);
+    }
+
+    let mut groups = guard.groups.iter_mut();
+
+    match groups.find(|i| i.1.name == data.group_name) {
+        None => {
+            return returnable_value("Group with that name does not exist", json, 400);
+        }
+        Some(i) => {
+            match i.1.people.iter().find(|j|{j.name == data.name}).unwrap().access {
+                Access::User => {
+                    let index = i.1.people.iter().position(|p|{p.name == data.name}).unwrap();
+                    i.1.people.remove(index);
+                },
+                Access::Admin => {
+                    let count = i.1.people.iter().filter(|p|{match p.access {
+                        Access::Admin => true,
+                        _ => false
+                    }}).count();
+                    if count == 1 {
+                        return returnable_value(
+                            "You can not quit this group",
+                            json,
+                            403,
+                        );
+                    }
+                    else {
+                        let index = i.1.people.iter().position(|p|{p.name == data.name}).unwrap();
+                         i.1.people.remove(index);
+                    }
+                }
+            };
+        }
+    }
+
+    returnable_value(
+        "You quit this group",
+        json,
+        200,
+    )
 }
 
 // fn is_group_exist(groups: &HashMap<i8, Group>, group_name: &String) -> bool {
