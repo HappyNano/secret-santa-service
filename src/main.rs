@@ -74,6 +74,7 @@ async fn main() -> tide::Result<()> {
     let state = Arc::new(Mutex::new(database));
     let mut app = tide::with_state(state);
 
+    app.at("/").get(index);
     app.at("/").post(index);
     app.at("/groups/list").get(get_groups);
     app.at("/groups/create").post(create_group);
