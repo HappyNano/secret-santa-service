@@ -82,6 +82,7 @@ async fn main() -> tide::Result<()> {
     app.at("/groups/members").post(get_members);
     app.at("/groups/quit").post(quit_group);
     app.at("/groups/delete").post(delete_group);
+    app.at("/groups/set_santas").post(set_santas);
     app.at("/terminate")
         .get(|request: tide::Request<Arc<Mutex<DataBase>>>| async move {
             let state = request.state();
@@ -93,10 +94,69 @@ async fn main() -> tide::Result<()> {
             #[allow(unreachable_code)]
             Ok("done")
         });
-    app.listen("192.168.0.104:8080").await?;
+    app.listen("192.168.0.103:8080").await?;
 
     println!("Done");
     Ok(())
+}
+
+async fn set_santas(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Data {
+        name: String,
+        group_name: String,
+    }
+    let data: Data = req.body_json().await.unwrap_or(Data {
+        name: String::new(),
+        group_name: String::new(),
+    });
+
+    let QueryData { json } = req.query().unwrap_or(QueryData { json: false });
+
+    if data.name == "" || data.group_name == "" {
+        return returnable_value("Bad data", json, 400);
+    }
+
+    let state = req.state();
+    let mut guard = state.lock().unwrap();
+
+    if !is_person_exist(&guard.groups, &data.name) {
+        return returnable_value("Person does not exist", json, 405);
+    }
+
+    let mut groups = guard.groups.iter_mut();
+
+    match groups.find(|i| i.1.name == data.group_name) {
+        None => {
+            return returnable_value("Group with that name does not exist", json, 400);
+        }
+        Some(i) => {
+            match i
+                .1
+                .people
+                .iter()
+                .find(|j| j.name == data.name)
+                .unwrap()
+                .access
+            {
+                Access::User => {
+                    return returnable_value("Only the administrator can assign a secret Santa", json, 403);
+                }
+                Access::Admin => {
+                    if i.1.people.len() < 2 {
+                        return returnable_value("Not enough group members", json, 405);
+                    }
+                    let last_index = i.1.people.len()-1;
+                    for j in 0..last_index {
+                        i.1.people[j].santa_to = i.1.people[j+1].name.clone();
+                    }
+                    i.1.people[last_index].santa_to = i.1.people[0].name.clone();
+                }
+            };
+        }
+    }
+
+    returnable_value("Secret santas are appointed", json, 200)
 }
 
 async fn quit_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
