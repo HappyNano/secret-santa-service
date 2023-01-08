@@ -76,6 +76,7 @@ async fn main() -> tide::Result<()> {
 
     app.at("/").get(index);
     app.at("/").post(index);
+    app.at("/to-who-gift").get(get_gifted);
     app.at("/groups/list").get(get_groups);
     app.at("/groups/create").post(create_group);
     app.at("/groups/join").post(join_group);
@@ -96,10 +97,60 @@ async fn main() -> tide::Result<()> {
             #[allow(unreachable_code)]
             Ok("done")
         });
-    app.listen("192.168.0.102:8080").await?; // Your ip address
+    app.listen("127.0.0.1:8080").await?; // Your ip address
 
     println!("Done");
     Ok(())
+}
+
+
+
+async fn get_gifted(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Data {
+        name: String,
+        group_name: String,
+    }
+    let data: Data = req.body_json().await.unwrap_or(Data {
+        name: String::new(),
+        group_name: String::new(),
+    });
+
+    let QueryData { json } = req.query().unwrap_or(QueryData { json: false });
+
+    if data.name == "" || data.group_name == "" {
+        return returnable_value("Bad data", json, 400);
+    }
+
+    let state = req.state();
+    let guard = state.lock().unwrap();
+    let mut groups = guard.groups.iter();
+
+    match groups.find(|i| i.1.name == data.group_name) {
+        Some(g) => {
+            if !g.1.closed {
+                return returnable_value("Given group is not closed", json, 400);
+            }
+            let mut people = g.1.people.iter();
+            match people.find(|person| person.name == data.name) {
+                Some(p) => {
+                    return Ok(json!({
+                        "code": 200,
+                        "message": {
+                            "gifted": p.santa_to
+                        }
+                    })
+                    .into());
+                }
+                None => {
+                    return returnable_value("There is no such person in given group", json, 400);
+                }
+            }
+        }
+        None => {
+            return returnable_value("There is no group with that name", json, 400);
+        }
+    }
 }
 
 async fn set_santas(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
@@ -157,6 +208,7 @@ async fn set_santas(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
                         i.1.people[j].santa_to = i.1.people[j + 1].name.clone();
                     }
                     i.1.people[last_index].santa_to = i.1.people[0].name.clone();
+                    i.1.closed = true;
                 }
             };
         }
@@ -196,6 +248,9 @@ async fn quit_group(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
             return returnable_value("Group with that name does not exist", json, 400);
         }
         Some(i) => {
+            if i.1.closed {
+                return returnable_value("Group is closed", json, 400);
+            }
             match i
                 .1
                 .people
