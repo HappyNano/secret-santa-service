@@ -1,3 +1,4 @@
+use serde::de::IntoDeserializer;
 use std::{
     collections::HashMap,
     fs::File,
@@ -103,8 +104,6 @@ async fn main() -> tide::Result<()> {
     Ok(())
 }
 
-
-
 async fn get_gifted(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Data {
@@ -134,13 +133,17 @@ async fn get_gifted(mut req: Request<Arc<Mutex<DataBase>>>) -> tide::Result {
             let mut people = g.1.people.iter();
             match people.find(|person| person.name == data.name) {
                 Some(p) => {
-                    return Ok(json!({
-                        "code": 200,
-                        "message": {
-                            "gifted": p.santa_to
-                        }
-                    })
-                    .into());
+                    if json {
+                        return Ok(json!({
+                            "code": 200,
+                            "message": {
+                                "gifted": p.santa_to
+                            }
+                        })
+                        .into());
+                    } else {
+                        return Ok(format!("You secret santa to - {}", p.santa_to).into());
+                    }
                 }
                 None => {
                     return returnable_value("There is no such person in given group", json, 400);
